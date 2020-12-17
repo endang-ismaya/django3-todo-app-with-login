@@ -1,10 +1,13 @@
 from django.db import IntegrityError
-from django.shortcuts import render, redirect
+from django.shortcuts import render, redirect, get_object_or_404
 from django.contrib.auth.forms import UserCreationForm, AuthenticationForm
 from django.contrib.auth.models import User
 from django.contrib.auth import login, logout, authenticate
+from django.utils import timezone
+
 from .forms import TodoForm
 from .models import Todo
+from django.contrib.auth.decorators import login_required
 
 
 def home(req):
@@ -44,17 +47,29 @@ def signupuser(req):
             except IntegrityError:
                 return render(req, 'todo/signupuser.html',
                               {'form': UserCreationForm(), 'error': 'Username already exists.'})
+            except ValueError:
+                return render(req, 'todo/signupuser.html',
+                              {'form': UserCreationForm(), 'error': 'Please fill all forms.'})
         else:
             # tell user the password mismatch
             return render(req, 'todo/signupuser.html',
                           {'form': UserCreationForm(), 'error': 'Password did not match'})
 
 
+@login_required
 def currenttodos(req):
     todos = Todo.objects.filter(user=req.user, datecompleted__isnull=True)
     return render(req, 'todo/currenttodos.html', {'todos': todos})
 
 
+@login_required
+def completedtodos(req):
+    todos = Todo.objects.filter(user=req.user, datecompleted__isnull=False)
+    todos.order_by('-datecompleted')
+    return render(req, 'todo/completedtodos.html', {'todos': todos})
+
+
+@login_required
 def logoutuser(req):
     if req.method == 'POST':
         logout(req)
@@ -62,6 +77,7 @@ def logoutuser(req):
 
 
 # Todos
+@login_required
 def createtodo(req):
     if req.method == 'GET':
         return render(req, 'todo/crud/createtodo.html', {'form': TodoForm()})
@@ -73,4 +89,43 @@ def createtodo(req):
             new_todo.save()
             return redirect('currenttodos')
         except ValueError:
-            return render(req, 'todo/crud/createtodo.html', {'form': TodoForm(), 'error': 'invalid data was submitted.'})
+            return render(req, 'todo/crud/createtodo.html',
+                          {'form': TodoForm(), 'error': 'invalid data was submitted.'})
+
+
+@login_required
+def viewtodo(req, todo_id):
+    todo = get_object_or_404(Todo, pk=todo_id, user=req.user)
+    if req.method == 'GET':
+        form = TodoForm(instance=todo)
+        return render(req, 'todo/crud/viewtodo.html', {'todo': todo, 'form': form})
+    else:
+        try:
+            form = TodoForm(req.POST, instance=todo)
+            form.save()
+            return redirect('currenttodos')
+        except ValueError:
+            form = TodoForm(instance=todo)
+            return render(req, 'todo/crud/viewtodo.html',
+                          {'todo': todo, 'form': form, 'error': 'invalid data was submitted.'})
+
+
+@login_required
+def completetodo(req, todo_id):
+    todo = get_object_or_404(Todo, pk=todo_id, user=req.user)
+    if req.method == 'POST':
+        todo.datecompleted = timezone.now()
+        todo.save()
+        return redirect('currenttodos')
+
+
+@login_required
+def deletetodo(req, todo_id):
+    todo = get_object_or_404(Todo, pk=todo_id, user=req.user)
+    if req.method == 'POST':
+        todo.delete()
+        return redirect('currenttodos')
+
+
+def pagenotfound(req):
+    return render(req, 'todo/404.html')
